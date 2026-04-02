@@ -1,0 +1,647 @@
+{
+  "system_summary": "Baggage Reconciliation System processing IATA Type B messaging (BSM/BPM) using event-sourced architecture with Kafka message broker and Oracle database for materialized views. Designed for 10k bags/hour throughput with event sourcing as the architectural foundation, employing CQRS pattern for separating write (event stream) and read (Oracle projections) concerns. System uses stateless service layer consuming from Kafka partitions with parallel reconciliation workers for horizontal scaling.",
+  "components": [
+    {
+      "name": "Kafka Message Broker",
+      "responsibility": "Durably store and distribute baggage event streams (BSM/BPM messages) to consumers with ordering and replay guarantees.",
+      "state_class": "STATEFUL",
+      "source": "SPECIFIED"
+    },
+    {
+      "name": "Oracle Database",
+      "responsibility": "Persist reconciled baggage state, transaction records, and queryable baggage history.",
+      "state_class": "STATEFUL",
+      "source": "SPECIFIED"
+    },
+    {
+      "name": "Event Store",
+      "responsibility": "Store immutable sequence of all baggage events as the source of truth for event-sourced architecture.",
+      "state_class": "STATEFUL",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Read Model Cache",
+      "responsibility": "Cache materialized views of baggage state to reduce database query load and improve read performance.",
+      "state_class": "STATEFUL",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Schema Registry",
+      "responsibility": "Manage and version schemas for IATA Type B message formats and internal event structures.",
+      "state_class": "STATEFUL",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Distributed Tracing System",
+      "responsibility": "Capture and correlate request flows across services for end-to-end baggage event processing visibility.",
+      "state_class": "STATEFUL",
+      "source": "INFERRED"
+    },
+    {
+      "name": "IATA Type B Message Parser Service",
+      "responsibility": "Parse and validate incoming BSM/BPM messages according to IATA Type B specifications.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Event Ingestion Service",
+      "responsibility": "Receive baggage events from external systems and publish to Kafka topics with appropriate routing.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Baggage Reconciliation Engine",
+      "responsibility": "Process baggage events from Kafka, apply reconciliation business logic, and identify discrepancies.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Event Projection Service",
+      "responsibility": "Consume events from Kafka and materialize read models into Oracle database for querying.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "State Query Service",
+      "responsibility": "Provide current baggage state by querying materialized read models from Oracle and cache.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Reconciliation Worker Pool",
+      "responsibility": "Execute reconciliation tasks in parallel by consuming events from Kafka partitions for throughput scaling.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Exception Handler Service",
+      "responsibility": "Process reconciliation exceptions, baggage discrepancies, and routing errors requiring intervention.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Snapshot Service",
+      "responsibility": "Periodically create baggage state snapshots from event stream to optimize event replay performance.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Replay Coordinator",
+      "responsibility": "Manage event stream replay operations for rebuilding read models or recovering from failures.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Dead Letter Queue Processor",
+      "responsibility": "Handle failed message processing attempts and implement retry logic with exponential backoff.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "API Gateway",
+      "responsibility": "Route external API requests, enforce rate limiting, and provide unified entry point for baggage queries.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Load Balancer",
+      "responsibility": "Distribute incoming traffic across service instances to ensure availability and performance.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Authentication Service",
+      "responsibility": "Verify identity of systems and users accessing baggage reconciliation data and APIs.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "Authorization Service",
+      "responsibility": "Enforce access control policies determining which entities can view or modify baggage information.",
+      "state_class": "STATELESS",
+      "source": "INFERRED"
+    },
+    {
+      "name": "API Rate Limiter",
+      "responsibility": "Throttle request rates per client to protect backend services from overload.",
+      "state_class": "HYBRID",
+      "source": "INFERRED"
+    }
+  ],
+  "patterns": [
+    {
+      "name": "Kafka Partition Ordering Guarantee",
+      "applies_to": [
+        "Kafka Message Broker",
+        "Baggage Reconciliation Engine",
+        "Reconciliation Worker Pool"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Baggage Reconciliation Engine requires ordered processing of BSM/BPM events per bag to prevent reconciliation logic from processing out-of-sequence events that would produce incorrect baggage state."
+    },
+    {
+      "name": "At-Least-Once Delivery",
+      "applies_to": [
+        "Kafka Message Broker",
+        "Event Ingestion Service",
+        "Baggage Reconciliation Engine"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Event Ingestion Service requires at-least-once delivery to prevent baggage event loss which would create undetectable gaps in the event stream causing permanent reconciliation failures."
+    },
+    {
+      "name": "Idempotent Consumer",
+      "applies_to": [
+        "Baggage Reconciliation Engine",
+        "Event Projection Service",
+        "Reconciliation Worker Pool"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Baggage Reconciliation Engine requires idempotent processing because at-least-once delivery guarantees from Kafka will produce duplicate events that would otherwise corrupt baggage state or double-count reconciliation outcomes."
+    },
+    {
+      "name": "Event Sourcing",
+      "applies_to": [
+        "Event Store",
+        "Baggage Reconciliation Engine",
+        "Event Projection Service",
+        "Snapshot Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Event Store requires immutable event append operations as the specified event-sourced architecture pattern makes the event log the source of truth for all baggage state reconstruction."
+    },
+    {
+      "name": "CQRS (Command Query Responsibility Segregation)",
+      "applies_to": [
+        "Event Projection Service",
+        "State Query Service",
+        "Oracle Database",
+        "Read Model Cache"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Event Projection Service requires separation of write and read models because event-sourced writes to Kafka and queryable reads from Oracle Database serve fundamentally different access patterns that cannot be efficiently served by a single model."
+    },
+    {
+      "name": "Eventual Consistency",
+      "applies_to": [
+        "Event Projection Service",
+        "Read Model Cache",
+        "State Query Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Event Projection Service produces eventual consistency between Kafka event stream and Oracle read models because asynchronous projection cannot guarantee immediate consistency without blocking event ingestion throughput."
+    },
+    {
+      "name": "Consumer Group Partitioning",
+      "applies_to": [
+        "Reconciliation Worker Pool",
+        "Kafka Message Broker"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Reconciliation Worker Pool requires Kafka consumer group partitioning to achieve horizontal scaling to meet the 10k bags/hour throughput requirement through parallel processing."
+    },
+    {
+      "name": "Dead Letter Queue",
+      "applies_to": [
+        "Dead Letter Queue Processor",
+        "Kafka Message Broker",
+        "Baggage Reconciliation Engine"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Dead Letter Queue Processor requires a dedicated queue for poison messages to prevent repeatedly failing BSM/BPM messages from blocking partition consumption and creating cascading baggage reconciliation delays."
+    },
+    {
+      "name": "Retry with Exponential Backoff",
+      "applies_to": [
+        "Dead Letter Queue Processor",
+        "Event Ingestion Service",
+        "Baggage Reconciliation Engine"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Dead Letter Queue Processor requires exponential backoff to prevent retry storms from overwhelming downstream services during transient failures while allowing eventual recovery."
+    },
+    {
+      "name": "Schema Evolution with Compatibility Guarantees",
+      "applies_to": [
+        "Schema Registry",
+        "IATA Type B Message Parser Service",
+        "Event Ingestion Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Schema Registry requires backward/forward compatibility enforcement to prevent deployment of incompatible IATA Type B message schema changes that would break in-flight event processing across service versions."
+    },
+    {
+      "name": "Snapshot Pattern for Event Replay Optimization",
+      "applies_to": [
+        "Snapshot Service",
+        "Event Store",
+        "Replay Coordinator"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Snapshot Service requires periodic state snapshots because replaying unbounded event streams from the Event Store would exceed acceptable recovery time as event volume grows over operational lifetime."
+    },
+    {
+      "name": "Materialized View Pattern",
+      "applies_to": [
+        "Event Projection Service",
+        "Oracle Database",
+        "State Query Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Event Projection Service requires pre-computed materialized views in Oracle Database because reconstructing baggage state from raw events at query time would violate read performance requirements."
+    },
+    {
+      "name": "Correlation ID Propagation",
+      "applies_to": [
+        "Distributed Tracing System",
+        "IATA Type B Message Parser Service",
+        "Baggage Reconciliation Engine",
+        "Event Projection Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Distributed Tracing System requires correlation IDs threaded through all service calls to trace individual baggage events through asynchronous processing stages for debugging reconciliation failures."
+    },
+    {
+      "name": "Competing Consumers",
+      "applies_to": [
+        "Reconciliation Worker Pool",
+        "Kafka Message Broker"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The Reconciliation Worker Pool requires multiple consumers competing for Kafka partition assignments to achieve horizontal scaling necessary for 10k bags/hour throughput target."
+    },
+    {
+      "name": "Message Validation at Entry Point",
+      "applies_to": [
+        "IATA Type B Message Parser Service",
+        "Event Ingestion Service"
+      ],
+      "classification": "REQUIRED",
+      "rationale": "The IATA Type B Message Parser Service requires strict schema validation before publishing to Kafka to prevent invalid messages from poisoning the event stream and breaking downstream reconciliation logic."
+    },
+    {
+      "name": "Circuit Breaker",
+      "applies_to": [
+        "Baggage Reconciliation Engine",
+        "Event Projection Service",
+        "State Query Service",
+        "Oracle Database"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The Baggage Reconciliation Engine should implement circuit breakers to Oracle Database to prevent cascading failures where slow database queries block Kafka consumer threads and cause partition lag buildup."
+    },
+    {
+      "name": "Bulkhead Isolation",
+      "applies_to": [
+        "Reconciliation Worker Pool",
+        "Baggage Reconciliation Engine"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The Reconciliation Worker Pool should isolate thread pools per Kafka partition to prevent failures processing one partition from exhausting resources needed for healthy partitions."
+    },
+    {
+      "name": "Cache-Aside Pattern",
+      "applies_to": [
+        "Read Model Cache",
+        "State Query Service",
+        "Oracle Database"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The State Query Service should implement cache-aside loading to reduce Oracle Database query load for frequently accessed baggage states while maintaining cache consistency with database updates."
+    },
+    {
+      "name": "Request Timeout",
+      "applies_to": [
+        "State Query Service",
+        "API Gateway",
+        "Oracle Database"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The State Query Service should enforce query timeouts to Oracle Database to prevent slow queries from blocking API Gateway threads and degrading overall system responsiveness."
+    },
+    {
+      "name": "API Rate Limiting (Token Bucket)",
+      "applies_to": [
+        "API Rate Limiter",
+        "API Gateway"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The API Rate Limiter should implement token bucket algorithm to protect State Query Service and Oracle Database from query floods that could degrade reconciliation throughput."
+    },
+    {
+      "name": "Load Balancing with Health Checks",
+      "applies_to": [
+        "Load Balancer",
+        "API Gateway",
+        "State Query Service"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The Load Balancer should actively health-check State Query Service instances to route traffic away from failing nodes and maintain query availability."
+    },
+    {
+      "name": "Backpressure Propagation",
+      "applies_to": [
+        "Event Ingestion Service",
+        "Kafka Message Broker",
+        "Baggage Reconciliation Engine"
+      ],
+      "classification": "RECOMMENDED",
+      "rationale": "The Event Ingestion Service should signal backpressure to external publishers when Kafka broker cannot accept messages at offered rate to prevent memory exhaustion."
+    },
+    {
+      "name": "Write-Through Cache",
+      "applies_to": [
+        "Event Projection Service",
+        "Read Model Cache",
+        "Oracle Database"
+      ],
+      "classification": "OPTIONAL",
+      "rationale": "The Event Projection Service could write-through to Read Model Cache when updating Oracle Database to reduce cache miss rate but eventual consistency model allows lazy cache population."
+    },
+    {
+      "name": "Transactional Outbox",
+      "applies_to": [
+        "Event Projection Service",
+        "Oracle Database",
+        "Kafka Message Broker"
+      ],
+      "classification": "OPTIONAL",
+      "rationale": "The Event Projection Service could use transactional outbox to atomically update Oracle Database and publish derived events to Kafka but current architecture does not specify such dual-write scenarios."
+    }
+  ],
+  "risks": [
+    {
+      "name": "Single Kafka Cluster SPOF",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P1-BLOCKING",
+      "description": "Single Kafka cluster with insufficient replication creates SPOF. Broker disk failure loses events if replication factor < 3. Network partition between brokers causes split-brain if no quorum. ZooKeeper/KRaft metadata service failure halts all broker operations.",
+      "mitigation": "Deploy Kafka cluster with replication factor >= 3, minimum 3 brokers across availability zones, enable KRaft quorum or ZooKeeper ensemble (3+ nodes), configure min.insync.replicas >= 2, implement cross-region replication for disaster recovery."
+    },
+    {
+      "name": "Single Oracle Instance SPOF",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P1-BLOCKING",
+      "description": "Single Oracle instance without RAC/DataGuard is complete SPOF. Disk array failure loses all reconciled state and read models. Network isolation from services halts all queries and projections. Tablespace exhaustion prevents new reconciliation state writes.",
+      "mitigation": "Deploy Oracle RAC for high availability or Oracle DataGuard for standby failover. Implement RAID storage with redundancy. Configure tablespace auto-extend with monitoring and alerting. Establish network redundancy with multiple paths to database."
+    },
+    {
+      "name": "Event Store Single Instance SPOF",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P1-BLOCKING",
+      "description": "If Event Store is separate from Kafka: single instance loses all history. Disk failure without RAID/replication loses source of truth. Network partition prevents event appends and replay operations. Storage exhaustion prevents new event ingestion.",
+      "mitigation": "If Event Store is separate from Kafka, deploy with replication (e.g., EventStoreDB clustering). Use RAID storage or cloud-native replicated storage. Implement storage monitoring with auto-scaling or alerting. Establish network redundancy."
+    },
+    {
+      "name": "Schema Registry Single Instance SPOF",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P1-BLOCKING",
+      "description": "Single Schema Registry instance prevents new schema validation. Disk failure loses schema versions breaking compatibility checks. Network isolation prevents message parser from validating schemas.",
+      "mitigation": "Deploy Schema Registry in clustered mode with multiple instances backed by Kafka topic for storage. Enable replication for the underlying Kafka topic. Implement health checks and automatic failover."
+    },
+    {
+      "name": "Non-Idempotent Reconciliation Logic Data Corruption",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Kafka \u2192 Reconciliation Engine interaction: non-idempotent reconciliation logic with duplicate events corrupts bag state. At-least-once delivery without deduplication causes duplicate events in stream that would corrupt baggage state or double-count reconciliation outcomes.",
+      "mitigation": "Implement idempotent reconciliation logic using event IDs for deduplication. Store processed event IDs in Oracle with bag state. Use database constraints to prevent duplicate processing. Apply idempotency keys to all state mutations."
+    },
+    {
+      "name": "Lost Updates from Concurrent Projections",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Reconciliation Engine \u2192 Oracle interaction: concurrent projections updating same bag record without optimistic locking causes lost updates. Race condition where multiple projection workers overwrite each other's state changes.",
+      "mitigation": "Implement optimistic locking using version columns in Oracle tables. Use Kafka partition key on bag ID to ensure single consumer processes events for each bag. Apply database-level constraints to detect concurrent modifications."
+    },
+    {
+      "name": "Dual-Write Consistency Failure",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Event Projection Service \u2192 Oracle/Kafka interaction: projection service crashes after Oracle commit but before Kafka offset commit causes duplicate projections. Creates inconsistency between processed events and committed offsets.",
+      "mitigation": "Store Kafka offsets in Oracle database transactionally with projection data. On startup, read offsets from Oracle and seek to last committed position. Alternatively, use Kafka transactions to atomically commit offsets and ensure idempotent projections handle duplicates."
+    },
+    {
+      "name": "Replay Concurrent with Live Processing Data Corruption",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Replay Coordinator \u2192 Kafka interaction: concurrent replay and live consumption processes same events causing duplicate projections. Race condition between replay consumer group and live consumer group both updating same read models.",
+      "mitigation": "Use separate read model tables for replay operations. Implement replay mode flag that disables live consumption. Use dedicated consumer groups with different offsets. Coordinate replay with distributed lock to prevent concurrent execution."
+    },
+    {
+      "name": "Partition Ordering Violation",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Event Ingestion \u2192 Kafka interaction: concurrent publishes of same bag ID without ordering key goes to different partitions. Violates partition ordering guarantee required for correct reconciliation state.",
+      "mitigation": "Configure Kafka producer to use bag ID as partition key for all BSM/BPM messages. Validate partition key is set before publishing. Implement producer-level validation to reject messages without proper routing key."
+    },
+    {
+      "name": "Invalid Message Poisoning Event Stream",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "IATA Parser \u2192 Event Ingestion interaction: schema registry timeout causes parser to fail-open accepting invalid messages. Invalid BSM/BPM messages poison Kafka stream and break downstream reconciliation logic.",
+      "mitigation": "Implement fail-closed validation: reject messages if Schema Registry is unavailable. Cache schemas locally with TTL for resilience. Require strict schema validation before Kafka publish with no bypass mechanisms. Route validation failures to separate dead letter topic."
+    },
+    {
+      "name": "Snapshot Inconsistent State Capture",
+      "branch": "SOFTWARE",
+      "severity": "P1-BLOCKING",
+      "description": "Snapshot Service \u2192 Event Store interaction: snapshot created while events still being written captures inconsistent state. Snapshot metadata committed but snapshot data write fails causes invalid recovery point.",
+      "mitigation": "Implement snapshot creation from stable offset position with no concurrent writes. Use database transactions to atomically write snapshot data and metadata. Validate snapshot integrity before marking as available for replay. Store offset position with snapshot."
+    },
+    {
+      "name": "API Gateway Missing Authentication Unauthorized Access",
+      "branch": "SECURITY",
+      "severity": "P1-BLOCKING",
+      "description": "API Gateway external boundary: missing authentication allows anonymous access to bag data. No mutual TLS allows external system to impersonate legitimate baggage system. Missing request signature validation allows message modification in transit.",
+      "mitigation": "Implement mutual TLS for all external API connections. Require client certificates for authentication. Implement request signature validation using HMAC or digital signatures. Deploy OAuth 2.0 or API key authentication for all endpoints."
+    },
+    {
+      "name": "Event Ingestion Missing Client Validation Fake Event Injection",
+      "branch": "SECURITY",
+      "severity": "P1-BLOCKING",
+      "description": "Event Ingestion Service external boundary: no client certificate validation allows rogue system to inject fake BSM/BPM messages. Missing authorization allows any authenticated client to publish any bag event. No message signature validation allows event modification.",
+      "mitigation": "Require mutual TLS with client certificate validation for all event publishers. Implement message-level digital signatures for BSM/BPM events. Apply authorization policies limiting which clients can publish events for specific airlines/airports. Log and audit all event sources."
+    },
+    {
+      "name": "Oracle Database Missing Row-Level Encryption Data Tampering",
+      "branch": "SECURITY",
+      "severity": "P1-BLOCKING",
+      "description": "Oracle Database privileged operation: missing row-level encryption allows DBA to modify reconciliation records. Application service accounts shared across services hide true caller identity. Overly permissive grants allow services to read unrelated tables.",
+      "mitigation": "Enable Oracle Transparent Data Encryption (TDE) for tablespaces. Implement row-level security policies with VPD (Virtual Private Database). Use separate service accounts per component with principle of least privilege. Enable database audit logging for all data modifications."
+    },
+    {
+      "name": "Kafka Missing SASL Authentication Unauthorized Stream Access",
+      "branch": "SECURITY",
+      "severity": "P1-BLOCKING",
+      "description": "Kafka Message Broker privileged operation: no SASL authentication allows unauthorized producer/consumer connection. No TLS encryption allows network eavesdropper to modify events in transit.",
+      "mitigation": "Enable Kafka SASL authentication (SASL/SCRAM or SASL/PLAIN with TLS). Configure Kafka ACLs restricting topic access per service account. Enable TLS encryption for all broker connections. Implement topic-level authorization for producers and consumers."
+    },
+    {
+      "name": "Kafka Disk Exhaustion Event Loss",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P2-HIGH",
+      "description": "Kafka Message Broker: disk exhaustion from unbounded retention prevents new event writes. Broker rejects producers when disk watermark reached.",
+      "mitigation": null
+    },
+    {
+      "name": "Oracle Archive Log Disk Full Write Halt",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P2-HIGH",
+      "description": "Oracle Database: archive log disk full stops all write transactions. Database enters suspended state until archive space available.",
+      "mitigation": null
+    },
+    {
+      "name": "Read Model Cache Cluster Failure Performance Degradation",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P2-HIGH",
+      "description": "Read Model Cache cluster failure degrades query performance but not correctness. Memory exhaustion causes evictions impacting read performance. Network partition causes cache inconsistency across nodes.",
+      "mitigation": null
+    },
+    {
+      "name": "Distributed Tracing System SPOF Observability Loss",
+      "branch": "INFRASTRUCTURE",
+      "severity": "P2-HIGH",
+      "description": "Single tracing collector creates observability SPOF. Disk failure loses historical trace data for debugging. Storage exhaustion drops traces impacting incident response.",
+      "mitigation": null
+    },
+    {
+      "name": "Kafka Backpressure Blocks Ingestion Threads",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "Event Ingestion \u2192 Kafka interaction: Kafka broker slow response blocks ingestion threads exhausting connection pool. Unbounded publishing rate exhausts Kafka broker memory causing backpressure.",
+      "mitigation": null
+    },
+    {
+      "name": "Consumer Rebalance Loses In-Flight Offsets",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "Kafka \u2192 Reconciliation Engine interaction: consumer rebalance during processing loses in-flight offset commits causing reprocessing. Slow Oracle query blocks consumer poll loop causing partition reassignment storm.",
+      "mitigation": null
+    },
+    {
+      "name": "Oracle Connection Pool Exhaustion Blocks Workers",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "Reconciliation Engine \u2192 Oracle interaction: Oracle connection pool exhaustion from slow queries blocks all reconciliation workers. Creates cascading failure where worker threads wait indefinitely for database connections.",
+      "mitigation": null
+    },
+    {
+      "name": "Cache Update Without Oracle Write Consistency Failure",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "Event Projection Service \u2192 Read Model Cache interaction: cache update succeeds but Oracle write fails leaves inconsistent state. Cache serves stale data that diverges from source of truth.",
+      "mitigation": null
+    },
+    {
+      "name": "Oracle Query Timeout Storm Exhausts API Threads",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "State Query Service \u2192 Oracle interaction: Oracle slowdown causes query timeout storm exhausting API Gateway threads. Query flood without rate limiting exhausts Oracle connection pool.",
+      "mitigation": null
+    },
+    {
+      "name": "DLQ Processor Retry Storm Thread Exhaustion",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "Dead Letter Queue Processor \u2192 Kafka interaction: DLQ processor retry storm on persistent failure exhausts thread pool. Unbounded DLQ growth from persistent parse failures exhausts disk.",
+      "mitigation": null
+    },
+    {
+      "name": "API Rate Limiter Distributed State Inconsistency",
+      "branch": "SOFTWARE",
+      "severity": "P2-HIGH",
+      "description": "API Rate Limiter state synchronization: distributed rate limiter nodes have inconsistent token counts allowing burst over limit. Rate limit state reset loses accumulated counts allowing immediate burst.",
+      "mitigation": null
+    },
+    {
+      "name": "State Query Service Missing Audit Trail Compliance Violation",
+      "branch": "SECURITY",
+      "severity": "P2-HIGH",
+      "description": "State Query Service privileged operation: missing query audit trail prevents compliance investigation. Over-privileged queries return passenger data not needed by caller.",
+      "mitigation": null
+    },
+    {
+      "name": "API Gateway Missing TLS PII Exposure",
+      "branch": "SECURITY",
+      "severity": "P2-HIGH",
+      "description": "API Gateway external boundary: missing TLS exposes bag PII data in transit. Missing audit logging prevents proving which system issued query.",
+      "mitigation": null
+    },
+    {
+      "name": "Event Ingestion Service Missing Event Attribution Repudiation",
+      "branch": "SECURITY",
+      "severity": "P2-HIGH",
+      "description": "Event Ingestion Service external boundary: missing event source attribution prevents identifying malicious event publisher. Logging raw BSM messages exposes passenger PII in logs.",
+      "mitigation": null
+    },
+    {
+      "name": "Oracle Missing Schema Change Audit Trail",
+      "branch": "SECURITY",
+      "severity": "P2-HIGH",
+      "description": "Oracle Database privileged operation: insufficient audit logging of schema changes and data modifications. Application account has DDL privileges allowing schema modification.",
+      "mitigation": null
+    },
+    {
+      "name": "Cache Miss During Projection Write Stale Read",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "State Query Service \u2192 Oracle/Cache interaction: cache miss concurrent with projection write returns incomplete state. Reading from cache while projection updates Oracle serves stale data beyond acceptable window.",
+      "mitigation": null
+    },
+    {
+      "name": "Replay Rate Exhausts Oracle Write Capacity",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "Replay Coordinator \u2192 Kafka/Event Store interaction: unbounded replay rate exhausts Oracle write capacity. Replay consumer group conflicts with live consumer group causing rebalance cascades.",
+      "mitigation": null
+    },
+    {
+      "name": "Snapshot Read During Heavy Write Degrades Ingestion",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "Snapshot Service \u2192 Event Store interaction: snapshot read during heavy write load degrades event ingestion performance. Snapshot storage growth without compaction exhausts disk.",
+      "mitigation": null
+    },
+    {
+      "name": "Schema Registry Cache Invalidation Uses Stale Schema",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "IATA Parser \u2192 Schema Registry interaction: schema registry cache invalidation during parse uses stale schema accepting invalid message. Schema validation CPU cost without rate limiting causes parser thread exhaustion.",
+      "mitigation": null
+    },
+    {
+      "name": "Token Revocation Race Allows Revoked Token",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "Authentication Service \u2192 API Gateway interaction: token revocation and validation race allows revoked token to pass. Auth service cache and database disagree on token validity.",
+      "mitigation": null
+    },
+    {
+      "name": "Exception Handler Circular Dependency Deadlock",
+      "branch": "SOFTWARE",
+      "severity": "P3-MEDIUM",
+      "description": "Exception Handler \u2192 multiple services interaction: exception handler and reconciliation engine both update bag status causing conflict. Circular dependency between exception handler and reconciliation engine on shared resource.",
+      "mitigation": null
+    },
+    {
+      "name": "State Query Service Missing Query Complexity Limits DoS",
+      "branch": "SECURITY",
+      "severity": "P3-MEDIUM",
+      "description": "State Query Service privileged operation: no query complexity limits allow expensive queries exhausting Oracle. Missing field-level authorization exposes restricted bag attributes.",
+      "mitigation": null
+    },
+    {
+      "name": "API Gateway Missing Rate Limiting Query Flood DoS",
+      "branch": "SECURITY",
+      "severity": "P3-MEDIUM",
+      "description": "API Gateway external boundary: no rate limiting at gateway allows query flood. Missing authentication allows anonymous access to bag data.",
+      "mitigation": null
+    }
+  ],
+  "unresolved_assumptions": [
+    "Latency/SLA requirements",
+    "Compute infrastructure (cloud/on-premise, provider)",
+    "High availability requirements",
+    "Disaster recovery requirements",
+    "Peak vs sustained throughput characteristics"
+  ]
+}
